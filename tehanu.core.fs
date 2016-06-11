@@ -1,11 +1,93 @@
-namespace Tehanu.Core
+namespace Tehanu.Core           
 
+type Result<'a> =
+  | Success of 'a
+  | Nothing
+  | Fail of 'a
+  | Hint of string * Result<'a>
+
+  override this.ToString() =
+    match this with                           
+    | Success x -> "success :: " + x.ToString()
+    | Nothing   -> "nothing"
+    | Fail    x ->    "fail :: " + x.ToString()
+    | Hint (s,x)->    "hint :: " + s + "\n" + x.ToString() 
+
+  member this.CombineHints(self: Result<'b>, result: Result<'c>) =
+    match this with
+    | Hint (x, xs) -> Hint (x, xs.CombineHints(self, result))
+    | _ ->
+      let rec getHints s =
+        match s with
+        | Hint (x, xs) -> Hint (x, getHints xs)
+        | _ -> result
+      getHints self
+
+  member this.GetResult(): option<'a> =
+    match this with 
+    | Success a | Fail a -> Some(a)
+    | Nothing -> None
+    | Hint (_, r) -> r.GetResult()
+
+  member this.AndResult(self: Result<'b>, f: option<'a> * option<'b> -> option<'c>, ispos: bool): Result<'c> =
+    match this with
+    | Hint (x, xs) -> Hint (x, xs.AndResult(self, f, ispos))
+    | Nothing ->
+      let rec getHints s =
+        match s with
+        | Hint (x, xs) -> Hint (x, getHints xs)
+        | Success rs ->
+          match f (None, Some (rs)) with   
+          | None -> Nothing         
+          | Some (c) -> if ispos then Success c else Fail c
+        | Fail rs ->
+          match f (None, Some (rs)) with   
+          | None -> Nothing                                
+          | Some (c) -> Fail c
+        | Nothing ->
+          match f (None, None) with   
+          | None -> Nothing
+          | Some (c) -> if ispos then Success c else Fail c
+      getHints self    
+    | Success rt ->
+      let rec getHints s =
+        match s with
+        | Hint (x, xs) -> Hint (x, getHints xs)
+        | Success rs ->
+          match f (Some (rt), Some (rs)) with   
+          | None -> Nothing
+          | Some (c) -> Success c
+        | Fail rs ->
+          match f (Some (rt), Some (rs)) with   
+          | None -> Nothing
+          | Some (c) -> Fail c 
+        | Nothing ->
+          match f (Some (rt), None) with   
+          | None -> Nothing             
+          | Some (c) -> if ispos then Success c else Fail c
+      getHints self
+    | Fail rt ->
+      let rec getHints s =
+        match s with
+        | Hint (x, xs) -> Hint (x, getHints xs)   
+        | Success rs | Fail rs ->
+          match f (Some (rt), Some (rs)) with   
+          | None -> Nothing
+          | Some (c) -> Fail c 
+        | Nothing ->
+          match f (Some (rt), None) with   
+          | None -> Nothing
+          | Some (c) -> if ispos then Success c else Fail c
+      getHints self  
+                                   
 type Tree =
   | Pair of ref<Tree> * ref<Tree>
   | Atom of string
+  | Error of string
   
   override this.ToString() =
     match this with
+    | Error t -> "#(error " + t + ")#"
     | Atom "nil" -> "nil"
     | Atom text -> text
     | Pair (x, y) ->
@@ -16,7 +98,7 @@ type Tree =
         let ystr = string !y
         "(" + (string !x) + " " + (ystr.Substring(1, ystr.Length - 1))
       | Atom text -> "(" + (string !x) + "." + text + ")"
-
+              
 module Generators =
   let rec genList (xs: list<Tree>): Tree =
     match xs with
